@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Painel Administrativo - SGT</title>
+    <style>
+        :root { --primary: #e67e22; --success: #27ae60; --danger: #e74c3c; --dark: #2c3e50; --info: #3498db; }
+        body { font-family: 'Segoe UI', sans-serif; background: #f0f2f5; margin: 0; padding: 20px; }
+        .container { max-width: 1000px; margin: 0 auto; display: grid; grid-template-columns: 1fr; gap: 20px; }
+        
+        @media (min-width: 850px) {
+            .container { grid-template-columns: 1fr 1fr; }
+            .full-width { grid-column: span 2; }
+        }
+
+        .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); position: relative; }
+        h2, h3 { color: var(--dark); margin-top: 0; border-bottom: 2px solid #eee; padding-bottom: 10px; }
+        
+        label { display: block; font-weight: bold; margin: 10px 0 5px; font-size: 0.9rem; }
+        input, select { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; margin-bottom: 10px; }
+        
+        .btn { padding: 12px 20px; border: none; border-radius: 4px; color: white; font-weight: bold; cursor: pointer; display: inline-block; }
+        .btn-add { background: var(--success); width: 100%; }
+        .btn-logout { background: var(--danger); position: absolute; top: 20px; right: 20px; padding: 6px 12px; font-size: 0.8rem; }
+        
+        .territorio-item { background: #f9f9f9; padding: 12px; border-radius: 6px; margin-top: 10px; border-left: 5px solid var(--primary); display: flex; justify-content: space-between; align-items: center; }
+        .delete-btn { color: var(--danger); cursor: pointer; font-weight: bold; font-size: 0.9rem; }
+        
+        /* Estilos do Monitor de Progresso */
+        .monitor-seletor { background: var(--dark); color: white; padding: 15px; border-radius: 6px; margin-bottom: 15px; }
+        .monitor-seletor label { color: white; }
+        .badge-concluida { background: var(--success); color: white; padding: 4px 8px; border-radius: 4px; font-weight: bold; display: inline-block; margin: 2px; font-size: 0.85rem; }
+        
+        .mapa-preview { width: 100%; height: 350px; border: 1px solid #ccc; border-radius: 6px; margin-top: 15px; background: #ddd; overflow: hidden; }
+        
+        .history-item { border-left: 5px solid var(--info); background: #f9f9f9; padding: 10px; margin-bottom: 8px; border-radius: 4px; font-size: 0.9rem; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    
+    <!-- CABEÇALHO DO SISTEMA -->
+    <div class="card full-width">
+        <h2>Painel de Controle do Administrador</h2>
+        <button class="btn btn-logout" onclick="logout()">Sair do Sistema</button>
+    </div>
+
+    <!-- PAINEL ESQUERDO: CADASTRO DE TERRITÓRIOS -->
+    <div class="card">
+        <h3>Anexar Novo Território</h3>
+        
+        <label>Nome do Território</label>
+        <input type="text" id="tNome" placeholder="Ex: Unidade 205 Ímpar">
+
+        <label>Link Embed do Canva (Mapa Geral)</label>
+        <input type="text" id="tGeral" placeholder="https://www.canva.com/design/.../view?embed">
+
+        <label>Link Embed do Canva (Mapa Interno da Quadra)</label>
+        <input type="text" id="tDetalhe" placeholder="https://www.canva.com/design/.../view?embed">
+
+        <label>Quantidade de Quadras</label>
+        <input type="number" id="tQuadras" value="42">
+
+        <button class="btn btn-add" onclick="adicionarTerritorio()">Salvar e Publicar Território</button>
+
+        <h3 style="margin-top: 25px;">Territórios Ativos no Sistema</h3>
+        <div id="listaTerritorios"></div>
+    </div>
+
+    <!-- PAINEL DIREITO: MONITORAMENTO DE PROGRESSO EM TEMPO REAL -->
+    <div class="card">
+        <h3>📊 Monitor de Progresso e Cobertura</h3>
+        
+        <div class="monitor-seletor">
+            <label>Selecione o Território para Inspecionar:</label>
+            <select id="seletorInspetor" onchange="inspecionarTerritorio(this.value)"></select>
+        </div>
+
+        <div id="dadosPainelInspetor">
+            <p><strong>Período de Cobertura:</strong> <span id="inspetorDatas">Nenhuma data registrada</span></p>
+            
+            <p><strong>Quadras Concluídas:</strong></p>
+            <div id="inspetorQuadrasConcluidas" style="margin-bottom: 15px;">-</div>
+
+            <label>Visualização do Mapa Ativo (Mapa Interno):</label>
+            <div class="mapa-preview">
+                <iframe id="inspetorIframe" src="" style="width: 100%; height: 100%; border: none;" allowfullscreen loading="lazy"></iframe>
+            </div>
+
+            <h4 style="margin-top: 20px; margin-bottom: 10px;">Últimas Atualizações do Publicador:</h4>
+            <div id="inspetorHistorico">-</div>
+        </div>
+    </div>
+
+</div>
+
+<script>
+    // Segurança básica: impede acesso sem login admin
+    const sessao = JSON.parse(localStorage.getItem('sgt_session'));
+    if(!sessao || sessao.role !== 'admin') { window.location.href = 'login.html'; }
+
+    function carregarDadosIniciais() {
+        carregarListaTerritorios();
+        alimentarSeletorInspetor();
+    }
+
+    function carregarListaTerritorios() {
+        const lista = document.getElementById('listaTerritorios');
+        const listaDados = JSON.parse(localStorage.getItem('sgt_territorios')) || [];
+        lista.innerHTML = listaDados.length === 0 ? '<p>Nenhum território cadastrado.</p>' : '';
+        
+        listaDados.forEach(t => {
+            const item = document.createElement('div');
+            item.className = 'territorio-item';
+            item.innerHTML = `
+                <div>
+                    <strong>${t.nome}</strong><br>
+                    <small>${t.quadras} quadras</small>
+                </div>
+                <span class="delete-btn" onclick="removerTerritorio(${t.id})">❌ Remover</span>
+            `;
+            lista.appendChild(item);
+        });
+    }
+
+    function alimentarSeletorInspetor() {
+        const seletor = document.getElementById('seletorInspetor');
+        const listaDados = JSON.parse(localStorage.getItem('sgt_territorios')) || [];
+        
+        seletor.innerHTML = '<option value="">-- Selecione um Território --</option>';
+        listaDados.forEach(t => {
+            const opt = document.createElement('option');
+            opt.value = t.id;
+            opt.innerText = t.nome;
+            seletor.appendChild(opt);
+        });
+
+        // Se houver territórios, inspeciona o primeiro automaticamente
+        if(listaDados.length > 0) {
+            seletor.value = listaDados[0].id;
+            inspecionarTerritorio(listaDados[0].id);
+        }
+    }
+
+    function inspecionarTerritorio(id) {
+        if(!id) {
+            document.getElementById('inspetorIframe').src = "";
+            return;
+        }
+
+        const listaDados = JSON.parse(localStorage.getItem('sgt_territorios')) || [];
+        const territorio = listaDados.find(t => t.id == id);
+        const todasVisitas = JSON.parse(localStorage.getItem('mapa_caisson')) || [];
+
+        if(!territorio) return;
+
+        // 1. Atualizar Datas de Cobertura
+        const dataInicio = territorio.dataInicio ? formatarDataBR(territorio.dataInicio) : "Não informada";
+        const dataFim = territorio.dataFim ? formatarDataBR(territorio.dataFim) : "Não informada";
+        document.getElementById('inspetorDatas').innerHTML = `📅 <strong>${dataInicio}</strong> até <strong>${dataFim}</strong>`;
+
+        // 2. Atualizar Iframe do Canva (Mapa Interno/Detalhado solicitado)
+        document.getElementById('inspetorIframe').src = territorio.mapaDetalhado;
+
+        // 3. Filtrar histórico e capturar Quadras Concluídas
+        const visitasDoTerritorio = todasVisitas.filter(v => v.territorioId == id || (!v.territorioId && id === 'padrao'));
+        
+        // Descobrir quais números de quadras foram concluídos
+        const quadrasConcluidasSet = new Set();
+        visitasDoTerritorio.forEach(v => {
+            if(v.status === 'Concluído') {
+                // Remove a palavra 'Quadra ' para pegar apenas o número
+                const numero = v.nome.replace('Quadra ', '');
+                quadrasConcluidasSet.add(parseInt(numero));
+            }
+        });
+
+        // Ordenar as quadras concluídas em ordem crescente
+        const quadrasOrdenadas = Array.from(quadrasConcluidasSet).sort((a, b) => a - b);
+        
+        const containerQuadras = document.getElementById('inspetorQuadrasConcluidas');
+        if(quadrasOrdenadas.length === 0) {
+            containerQuadras.innerHTML = "<em style='color:gray;'>Nenhuma quadra marcada como concluída ainda.</em>";
+        } else {
+            containerQuadras.innerHTML = quadrasOrdenadas.map(q => `<span class="badge-concluida">Quadra ${q}</span>`).join(' ');
+        }
+
+        // 4. Renderizar mini histórico de logs na tela do admin
+        const containerHistorico = document.getElementById('inspetorHistorico');
+        if(visitasDoTerritorio.length === 0) {
+            containerHistorico.innerHTML = "<p style='color:gray;'>Sem registros de visitas.</p>";
+        } else {
+            containerHistorico.innerHTML = '';
+            visitasDoTerritorio.slice(0, 5).forEach(v => { // Exibe os 5 últimos logs
+                const item = document.createElement('div');
+                item.className = 'history-item';
+                item.innerHTML = `
+                    <strong>${v.nome}</strong> - <span style="color:${v.status === 'Concluído' ? 'var(--success)' : 'var(--primary)'}">${v.status}</span><br>
+                    <small>Data: ${v.data}</small>
+                    <p style="margin:4px 0 0 0; font-style:italic;">"${v.obs || 'Sem observações.'}"</p>
+                `;
+                containerHistorico.appendChild(item);
+            });
+        }
+    }
+
+    function adicionarTerritorio() {
+        const nome = document.getElementById('tNome').value;
+        const mapaGeral = document.getElementById('tGeral').value;
+        const mapaDetalhado = document.getElementById('tDetalhe').value;
+        const quadras = document.getElementById('tQuadras').value;
+
+        if(!nome || !mapaGeral || !mapaDetalhado) return alert("Preencha todos os campos obrigatórios!");
+
+        const novo = { 
+            id: Date.now(), 
+            nome, 
+            mapaGeral, 
+            mapaDetalhado, 
+            quadras: parseInt(quadras),
+            dataInicio: '', 
+            dataFim: '' 
+        };
+        
+        let ativos = JSON.parse(localStorage.getItem('sgt_territorios')) || [];
+        ativos.push(novo);
+        localStorage.setItem('sgt_territorios', JSON.stringify(ativos));
+        
+        document.getElementById('tNome').value = '';
+        document.getElementById('tGeral').value = '';
+        document.getElementById('tDetalhe').value = '';
+
+        carregarDadosIniciais();
+    }
+
+    function removerTerritorio(id) {
+        if(confirm("Deseja mesmo excluir este território? Todas as configurações ligadas a ele sumirão.")) {
+            let ativos = JSON.parse(localStorage.getItem('sgt_territorios')) || [];
+            ativos = ativos.filter(t => t.id !== id);
+            localStorage.setItem('sgt_territorios', JSON.stringify(ativos));
+            carregarDadosIniciais();
+        }
+    }
+
+    function formatarDataBR(dataString) {
+        if(!dataString) return "";
+        const [ano, mes, dia] = dataString.split('-');
+        return `${dia}/${mes}/${ano}`;
+    }
+
+    function logout() {
+        localStorage.removeItem('sgt_session');
+        window.location.href = 'login.html';
+    }
+
+    window.onload = carregarDadosIniciais;
+</script>
+</body>
+</html>
